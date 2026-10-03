@@ -227,13 +227,13 @@ def _finish_login(context, email: str):
 
 # ------------------------------------------------------------------ invite job
 
-def process_job(jid: str, email: str, buyer: str = "", chat_id: str = ""):
+def process_job(jid: str, email: str, buyer: str = "", chat_id: str = "", team_name: str = ""):
     """Fire-and-forget thread: invite bhejo, DB update karo, buyer+owner ko batao."""
-    threading.Thread(target=_process_job, args=(jid, email, buyer, chat_id), daemon=True).start()
+    threading.Thread(target=_process_job, args=(jid, email, buyer, chat_id, team_name), daemon=True).start()
 
 
-def _process_job(jid: str, email: str, buyer: str, chat_id: str):
-    res = submit("invite", {"email": email}, timeout=240)
+def _process_job(jid: str, email: str, buyer: str, chat_id: str, team_name: str = ""):
+    res = submit("invite", {"email": email,"team_name":team_name}, timeout=240)
     ok = bool(res.get("ok"))
     note = str(res.get("note", ""))[:200]
     try:
@@ -292,10 +292,14 @@ def _worker():
                     res = _do_login(pw, payload["email"], payload.get("password", ""))
                 elif kind == "otp":
                     res = _do_otp(payload.get("otp") or payload.get("code") or "")
-                elif kind == "team_inspect":
-                    res = _team_inspect(pw)
+                elif kind == "teams":
+                    import canva_teams
+                    res = canva_teams.discover(pw)
+                elif kind == "team_check":
+                    import canva_teams
+                    res = canva_teams.check(pw,payload["team_name"])
                 elif kind == "invite":
-                    res = canva_invite._invite_impl(pw, payload["email"], headless=False)
+                    res = canva_invite._invite_impl(pw, payload["email"], headless=False,team_name=payload.get("team_name", ""))
                 else:
                     res = {"status": "fail", "ok": False, "message": "unknown task"}
             except Exception as exc:
@@ -320,28 +324,3 @@ def submit(kind: str, payload: dict, timeout: int = 180) -> dict:
                 "message": "browser task timeout - dobara try karo",
                 "note": "worker timeout"}
 
-
-def _team_inspect(pw):
-    browser = pw.chromium.launch(headless=False, args=["--no-sandbox", "--disable-dev-shm-usage"])
-    context = browser.new_context(storage_state=str(SESSION_FILE))
-    page = context.new_page()
-    try:
-        page.goto("https://www.canva.com/", wait_until="domcontentloaded", timeout=45000)
-        page.wait_for_timeout(3500)
-        canva_invite._dismiss_cookies(page)
-        controls = page.locator("button, [role=button]").evaluate_all("(els)=>els.filter(e=>e.getBoundingClientRect().width>0).map(e=>({text:(e.innerText||'').trim(),label:e.getAttribute('aria-label'),testid:e.getAttribute('data-testid')}))")
-        for pattern in [r"profile", r"your account", r"account menu", r"account", r"switch team"]:
-            button = canva_invite._find_visible(page, page.get_by_role("button", name=canva_invite.re.compile(pattern, canva_invite.re.I)))
-            if button:
-                button.click(timeout=5000)
-                page.wait_for_timeout(1200)
-                break
-        personal = canva_invite._find_visible(page, page.get_by_text("Personal", exact=True))
-        before = personal.evaluate("(e)=>e.parentElement.parentElement.parentElement.outerHTML") if personal else ""
-        if personal:
-            personal.click(timeout=5000)
-            page.wait_for_timeout(1500)
-        return {"ok": True, "team_html":before, "after_html":page.locator("[role=dialog],[role=menu],[role=listbox]").evaluate_all("(es)=>es.filter(e=>e.getBoundingClientRect().width>0).map(e=>e.outerHTML)"), "url":page.url, "controls":controls, "body":(page.inner_text("body") or "")[:12000], "menu":page.locator("[role=menuitem], [role=option], [role=menuitemradio], [role=menuitemcheckbox], button").evaluate_all("(els)=>els.filter(e=>e.getBoundingClientRect().width>0).map(e=>({text:(e.innerText||'').trim(),label:e.getAttribute('aria-label'),role:e.getAttribute('role'),checked:e.getAttribute('aria-checked'),selected:e.getAttribute('aria-selected')}))")}
-    finally:
-        context.close()
-        browser.close()

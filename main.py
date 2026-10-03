@@ -83,6 +83,11 @@ def init_db():
 
 
 init_db()
+with db() as conn:
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(canva_jobs)")}
+    for column in ("team_id", "team_name"):
+        if column not in columns:
+            conn.execute(f"ALTER TABLE canva_jobs ADD COLUMN {column} TEXT DEFAULT ''")
 
 
 async def notify_owner(text: str):
@@ -739,16 +744,21 @@ async def v1_canva_invite(request: Request):
     if not _canva_session_ready():
         return JSONResponse({"ok": False, "error": "Canva session nahi - owner /canva pe login kare",
                              "status": "no_session"}, status_code=200)
+    import canva_teams
+    selected_id = str(data.get("team_id", ""))
+    team = canva_teams.resolve(selected_id)
+    if not team:
+        return JSONResponse({"ok": False, "error": "Fetch teams and select a valid team_id"}, status_code=400)
     buyer = str(data.get("buyer", ""))[:60]
     jid = uuid.uuid4().hex[:10]
     with db() as conn:
         conn.execute(
-            "INSERT INTO canva_jobs (id, email, buyer, chat_id, source, created_at) "
-            "VALUES (?,?,?,?,?,?)",
-            (jid, email, buyer, "", "api", time.time()),
+            "INSERT INTO canva_jobs (id, email, buyer, chat_id, source, created_at,team_id,team_name,status) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (jid, email, buyer, "", "api", time.time(),selected_id,team["name"],"processing"),
         )
     import canva_worker
-    canva_worker.process_job(jid, email, buyer, "")  # chat_id khali = koi TG msg nahi
+    canva_worker.process_job(jid, email, buyer, "", team["name"])  # chat_id khali = koi TG msg nahi
     return {"ok": True, "id": jid, "status": "processing",
             "message": "Invite process ho rahi hai - GET /v1/canva/job?id=" + jid + " se status poocho"}
 
@@ -919,26 +929,30 @@ CANVA_INVITE_PAGE = """<!doctype html>
 *{box-sizing:border-box}body{margin:0;background:#0d1424;color:#edf3ff;font:16px system-ui,sans-serif;padding:40px 16px}
 main{max-width:520px;margin:0 auto;background:#152039;border:1px solid #293955;border-radius:20px;padding:28px}
 .brand{color:#80aaff;font-size:12px;font-weight:700;letter-spacing:2px}h1{font-size:28px;margin:12px 0 8px}p{color:#a8b8d2;line-height:1.6}
-label{display:block;margin:24px 0 8px}input,button{width:100%;font:inherit;border-radius:10px;padding:14px}
-input{background:#0d1424;border:1px solid #354a6b;color:white}input:focus{outline:2px solid #5e95ff}
+label{display:block;margin:24px 0 8px}input,select,button{width:100%;font:inherit;border-radius:10px;padding:14px}
+input,select{background:#0d1424;border:1px solid #354a6b;color:white}input:focus{outline:2px solid #5e95ff}
 button{margin-top:14px;border:0;background:#387afa;color:white;font-weight:700;cursor:pointer}button:disabled{opacity:.5;cursor:wait}
 a{color:#8eb6ff}nav{display:flex;gap:20px;margin-top:22px;font-size:14px}#status,#result{padding:14px;border-radius:10px;background:#0d1424;margin-top:18px;white-space:pre-wrap;overflow-wrap:anywhere}
 .good{color:#80e2b1}.bad{color:#ffb0b0}.muted{color:#a8b8d2;font-size:14px}
 </style></head><body><main><div class="brand">ELITE TOOLS STORE</div><h1>Send Canva invite</h1>
 <p>Enter the recipient's email to invite them to your Canva team.</p><div id="status" role="status">Checking Canva login…</div>
-<form id="form"><label for="email">Recipient email</label><input id="email" name="email" type="email" autocomplete="email" placeholder="client@example.com" maxlength="254" required>
+<button id="refresh" type="button">Refresh teams</button><form id="form"><label for="team">Canva team</label><select id="team" required disabled><option value="">Fetch teams first</option></select><div id="teaminfo" class="muted" role="status"></div><label for="email">Recipient email</label><input id="email" name="email" type="email" autocomplete="email" placeholder="client@example.com" maxlength="254" required>
 <button id="send" type="submit" disabled>Send invite</button></form><div id="result" role="status" hidden></div>
 <nav><a href="/canva">Canva login</a><a href="/admin">Admin panel</a></nav></main>
 <script>
-const el=id=>document.getElementById(id);let loggedIn=false;
+const el=id=>document.getElementById(id);let loggedIn=false;let busy=false;let teams=[];
+function buttons(){el("send").disabled=busy||!loggedIn||!el("team").value;el("refresh").disabled=busy||!loggedIn;el("team").disabled=busy||!teams.length;}
+el("team").onchange=()=>{localStorage.setItem("canva_selected_team",el("team").value);buttons();};
+async function fetchTeams(){busy=true;buttons();el("teaminfo").textContent="Fetching available teams from Canva…";try{const data=await read(await fetch("/api/canva/teams"));teams=data.teams;el("team").replaceChildren(new Option("Choose a team", ""));for(const team of teams){const option=new Option(team.name+(team.plan?" — "+team.plan:"")+(team.members?" · "+team.members+" members":""),team.id);option.disabled=team.ambiguous;el("team").add(option);}const saved=localStorage.getItem("canva_selected_team");if(teams.some(t=>t.id===saved&&!t.ambiguous))el("team").value=saved;el("teaminfo").textContent=teams.length+" available teams. Choose where to send the invite.";}catch(error){teams=[];el("team").replaceChildren(new Option("Refresh teams to try again",""));el("teaminfo").textContent=error.message;}finally{busy=false;buttons();}}
+el("refresh").onclick=fetchTeams;
 function show(text,bad=false){el('result').hidden=false;el('result').textContent=text;el('result').className=bad?'bad':'';}
 async function read(response){if(response.status===401){location.href='/admin';throw Error('Admin login required');}const data=await response.json();if(!response.ok||data.ok===false)throw Error(data.error||'Request failed');return data;}
-async function health(){try{const data=await read(await fetch('/api/canva/status'));loggedIn=data.logged_in;el('status').textContent=loggedIn?'Canva session saved — ready to invite.':'Canva login required. Open Canva login below and complete email + OTP.';el('status').className=loggedIn?'good':'bad';el('send').disabled=!loggedIn;}catch(error){el('status').textContent=error.message;}}
+async function health(){try{const data=await read(await fetch('/api/canva/status'));loggedIn=data.logged_in;el('status').textContent=loggedIn?'Canva session saved — ready to invite.':'Canva login required. Open Canva login below and complete email + OTP.';el('status').className=loggedIn?'good':'bad';buttons();if(loggedIn)await fetchTeams();}catch(error){el('status').textContent=error.message;}}
 async function track(id,email){for(let i=0;i<180;i++){await new Promise(r=>setTimeout(r,2000));let job;try{job=await read(await fetch('/api/canva/invite-job?id='+encodeURIComponent(id)));}catch(error){show('Status check interrupted: '+error.message,true);continue;}
-if(job.status==='sent'){show('Invite sent to '+email+' ✅');el('send').disabled=false;return;}
-if(job.status==='failed'){show('Invite failed: '+(job.note||'Please check Canva login and try again.'),true);el('send').disabled=false;return;}}
-show('Still processing. Refresh and submit the same email to check the existing request.');el('send').disabled=false;}
-el('form').onsubmit=async event=>{event.preventDefault();el('send').disabled=true;const email=el('email').value.trim();show('Processing invite for '+email+'…');try{const data=await read(await fetch('/api/canva/send-invite',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})}));await track(data.id,email);}catch(error){show(error.message,true);el('send').disabled=!loggedIn;}};
+if(job.status==='sent'){show('Invite sent to '+email+' in '+job.team_name+' ✅');busy=false;buttons();return;}
+if(job.status==='failed'){show('Invite failed: '+(job.note||'Please check Canva login and try again.'),true);busy=false;buttons();return;}}
+show('Still processing. Refresh and submit the same email to check the existing request.');busy=false;buttons();}
+el('form').onsubmit=async event=>{event.preventDefault();busy=true;buttons();const email=el('email').value.trim();show('Processing invite for '+email+'…');try{const data=await read(await fetch('/api/canva/send-invite',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,team_id:el('team').value})}));await track(data.id,email);}catch(error){show(error.message,true);busy=false;buttons();}};
 health();
 </script></body></html>"""
 
@@ -964,21 +978,26 @@ async def canva_send_invite(request: Request):
     if not _canva_session_ready():
         return JSONResponse({"ok": False, "error": "Complete Canva login first using the Canva login link."}, status_code=409)
     import canva_worker
+    import canva_teams
+    selected_id = str(data.get("team_id", ""))
+    team = canva_teams.resolve(selected_id)
+    if not team:
+        return JSONResponse({"ok": False, "error": "Refresh teams and choose a team first"}, status_code=400)
     jid = uuid.uuid4().hex[:10]
     with db() as conn:
         conn.execute("BEGIN IMMEDIATE")
         existing = conn.execute(
-            "SELECT id FROM canva_jobs WHERE email=? AND status IN ('pending','processing','claimed') ORDER BY created_at DESC LIMIT 1",
-            (email,),
+            "SELECT id FROM canva_jobs WHERE email=? AND team_id=? AND status IN ('pending','processing','claimed') ORDER BY created_at DESC LIMIT 1",
+            (email,selected_id),
         ).fetchone()
         if existing:
             return {"ok": True, "id": existing["id"], "status": "processing"}
         conn.execute(
-            "INSERT INTO canva_jobs (id,email,buyer,source,created_at,status) VALUES (?,?,?,?,?,?)",
-            (jid, email, "admin", "admin_page", time.time(), "processing"),
+            "INSERT INTO canva_jobs (id,email,buyer,source,created_at,status,team_id,team_name) VALUES (?,?,?,?,?,?,?,?)",
+            (jid, email, "admin", "admin_page", time.time(), "processing",selected_id,team["name"]),
         )
     try:
-        canva_worker.process_job(jid, email, "admin", "")
+        canva_worker.process_job(jid, email, "admin", "",team["name"])
     except Exception:
         with db() as conn:
             conn.execute("UPDATE canva_jobs SET status='failed',note=?,updated_at=? WHERE id=?",
@@ -992,17 +1011,32 @@ async def canva_invite_job_admin(request: Request, id: str = ""):
     if not admin_ok(request):
         return JSONResponse({"ok": False, "error": "Admin login required"}, status_code=401)
     with db() as conn:
-        row = conn.execute("SELECT id,email,status,note FROM canva_jobs WHERE id=?", (id,)).fetchone()
+        row = conn.execute("SELECT id,email,status,note,team_name FROM canva_jobs WHERE id=?", (id,)).fetchone()
     if not row:
         return JSONResponse({"ok": False, "error": "Invite request not found"}, status_code=404)
     return {"ok": True, **dict(row)}
 
 
-@app.get("/api/canva/team-inspect")
-async def canva_team_inspect(request: Request):
+
+@app.get("/api/canva/teams")
+async def canva_available_teams(request: Request):
+    if not admin_ok(request):
+        return JSONResponse({"ok":False,"error":"Admin login required"},status_code=401)
+    if not _canva_session_ready():
+        return JSONResponse({"ok":False,"error":"Complete Canva login first"},status_code=409)
+    import canva_worker
+    result = await asyncio.to_thread(canva_worker.submit,"teams",{},120)
+    if not result.get("ok"):
+        return JSONResponse({"ok":False,"error":result.get("error") or result.get("message") or "Teams could not be fetched"},status_code=502)
+    return result
+
+
+@app.get("/api/canva/team-check")
+async def canva_selected_team_check(request: Request, team_id: str = ""):
     if not admin_ok(request):
         return JSONResponse({"ok":False},status_code=401)
-    if not _canva_session_ready():
-        return {"ok":False,"error":"Complete Canva login first"}
-    import canva_worker
-    return await asyncio.to_thread(canva_worker.submit,"team_inspect",{},120)
+    import canva_teams, canva_worker
+    team = canva_teams.resolve(team_id)
+    if not team:
+        return JSONResponse({"ok":False,"error":"Refresh and select a team"},status_code=400)
+    return await asyncio.to_thread(canva_worker.submit,"team_check",{"team_name":team["name"]},150)

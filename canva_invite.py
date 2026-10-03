@@ -135,7 +135,7 @@ def invite(email: str, debug: bool = False) -> dict:
         return _invite_impl(p, email, debug=debug)
 
 
-def _invite_impl(pw, email: str, debug: bool = False, headless: bool = True) -> dict:
+def _invite_impl(pw, email: str, debug: bool = False, headless: bool = True, team_name: str = "") -> dict:
     """invite() ka asal kaam - pw bahar se bhi de sakte hain (worker thread)."""
     email = (email or "").strip().lower()
     if not re.match(r"^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$", email):
@@ -149,9 +149,10 @@ def _invite_impl(pw, email: str, debug: bool = False, headless: bool = True) -> 
     context = browser.new_context(storage_state=str(SESSION_FILE))
     page = context.new_page()
     try:
-        err = _open_settings(page)
+        import canva_teams
+        err = canva_teams.open_team_settings(page,team_name)
         if err:
-            return {"ok": False, "note": err, "shot": _shot(page, "open_fail")}
+            return {"ok":False,"note":err,"shot":_shot(page,"team_selection_failed")}
 
         # invite dialog kholo
         btn = _find_visible(page, page.get_by_role("button", name=INVITE_BTN_TEXTS))
@@ -254,3 +255,4 @@ if __name__ == "__main__":
         sys.exit(0 if result["ok"] else 1)
     else:
         print("Use: python canva_invite.py login | python canva_invite.py invite <email> [--debug]")
+

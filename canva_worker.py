@@ -55,9 +55,11 @@ def _close_login_browser():
 
 
 def _looks_logged_in(page) -> bool:
-    """Settings > People page kholo - invite button dikhe to login hai."""
+    """Confirm the signed-in account UI independently of team invite rights."""
     try:
-        return canva_invite._open_settings(page) == ""
+        account = page.get_by_role(
+            "button", name=canva_invite.re.compile(r"More account and team options$"))
+        return any(account.nth(i).is_visible() for i in range(account.count()))
     except Exception:
         return False
 
@@ -82,7 +84,7 @@ def _do_login(pw, email: str, password: str = "") -> dict:
     _login["browser"] = browser
     _login["context"] = context
     _login["page"] = page
-    EMAIL_FILE.write_text(email, encoding="utf-8")
+    _login["email"] = email
 
     page.goto("https://www.canva.com/login", wait_until="domcontentloaded", timeout=45000)
     page.wait_for_timeout(3000)
@@ -203,14 +205,16 @@ def _do_otp(code: str) -> dict:
     while time.time() < deadline:
         page.wait_for_timeout(2000)
         body = _body_text(page)
-        if any(w in body for w in ("invalid", "incorrect code", "expired", "try again")):
+        # Team plan banners can contain "expired"; only code-specific errors
+        # mean OTP failed. Confirm the account UI before checking those errors.
+        if _looks_logged_in(page):
+            _finish_login(_login["context"], _login.get("email", ""))
+            return {"status": "ok", "message": "OTP verify - Canva session save ho gayi"}
+        if canva_invite.re.search(
+            r"invalid code|incorrect code|code (?:has |is )?expired|expired code|code.*(?:is invalid|has expired)", body):
             canva_invite._shot(page, "otp_bad")
             _close_login_browser()
             return {"status": "fail", "message": "OTP ghalat ya expire ho gaya - dobara login karo"}
-        if "/login" not in (page.url or "") and _looks_logged_in(page):
-            email = EMAIL_FILE.read_text(encoding="utf-8").strip() if EMAIL_FILE.exists() else ""
-            _finish_login(_login["context"], email)
-            return {"status": "ok", "message": "OTP verify - Canva session save ho gayi"}
     canva_invite._shot(page, "otp_timeout")
     _close_login_browser()
     return {"status": "fail", "message": "OTP ke baad login confirm nahi hua (timeout)"}

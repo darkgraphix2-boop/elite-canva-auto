@@ -143,7 +143,7 @@ def check(pw, name):
         error = open_team_settings(page, name)
         return {'ok':not bool(error),'team_name':name,'can_invite':not bool(error),'note':error or 'Selected team verified on People settings'}
     except Exception as exc:
-        return {'ok':False,'team_name':name,'can_invite':False,'note':str(exc)[:180]}
+        return {'ok':False,'team_name':name,'can_invite':False,'note':str(exc)[:180], 'ui':page.inner_text('body')[:6000], 'buttons':page.locator('button,[role=button]').evaluate_all("es=>es.filter(e=>e.getBoundingClientRect().width>0).map(e=>({text:(e.innerText||'').trim(),label:e.getAttribute('aria-label')}))")}
     finally:
         context.close()
         browser.close()

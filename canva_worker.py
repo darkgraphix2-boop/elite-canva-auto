@@ -292,6 +292,8 @@ def _worker():
                     res = _do_login(pw, payload["email"], payload.get("password", ""))
                 elif kind == "otp":
                     res = _do_otp(payload.get("otp") or payload.get("code") or "")
+                elif kind == "team_inspect":
+                    res = _team_inspect(pw)
                 elif kind == "invite":
                     res = canva_invite._invite_impl(pw, payload["email"], headless=False)
                 else:
@@ -317,3 +319,24 @@ def submit(kind: str, payload: dict, timeout: int = 180) -> dict:
         return {"status": "fail", "ok": False,
                 "message": "browser task timeout - dobara try karo",
                 "note": "worker timeout"}
+
+
+def _team_inspect(pw):
+    browser = pw.chromium.launch(headless=False, args=["--no-sandbox", "--disable-dev-shm-usage"])
+    context = browser.new_context(storage_state=str(SESSION_FILE))
+    page = context.new_page()
+    try:
+        page.goto("https://www.canva.com/", wait_until="domcontentloaded", timeout=45000)
+        page.wait_for_timeout(3500)
+        canva_invite._dismiss_cookies(page)
+        controls = page.locator("button, [role=button]").evaluate_all("(els)=>els.filter(e=>e.getBoundingClientRect().width>0).map(e=>({text:(e.innerText||'').trim(),label:e.getAttribute('aria-label'),testid:e.getAttribute('data-testid')}))")
+        for pattern in [r"profile", r"your account", r"account menu", r"account", r"switch team"]:
+            button = canva_invite._find_visible(page, page.get_by_role("button", name=canva_invite.re.compile(pattern, canva_invite.re.I)))
+            if button:
+                button.click(timeout=5000)
+                page.wait_for_timeout(1200)
+                break
+        return {"ok": True, "url":page.url, "controls":controls, "body":(page.text_content("body") or "")[:18000], "menu":page.locator("[role=menuitem], [role=option], [role=menuitemradio], [role=menuitemcheckbox], button").evaluate_all("(els)=>els.filter(e=>e.getBoundingClientRect().width>0).map(e=>({text:(e.innerText||'').trim(),label:e.getAttribute('aria-label'),role:e.getAttribute('role'),checked:e.getAttribute('aria-checked'),selected:e.getAttribute('aria-selected')}))")}
+    finally:
+        context.close()
+        browser.close()

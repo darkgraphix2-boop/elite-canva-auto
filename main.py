@@ -996,3 +996,13 @@ async def canva_invite_job_admin(request: Request, id: str = ""):
     if not row:
         return JSONResponse({"ok": False, "error": "Invite request not found"}, status_code=404)
     return {"ok": True, **dict(row)}
+
+
+@app.get("/api/canva/team-inspect")
+async def canva_team_inspect(request: Request):
+    if not admin_ok(request):
+        return JSONResponse({"ok":False},status_code=401)
+    if not _canva_session_ready():
+        return {"ok":False,"error":"Complete Canva login first"}
+    import canva_worker
+    return await asyncio.to_thread(canva_worker.submit,"team_inspect",{},120)

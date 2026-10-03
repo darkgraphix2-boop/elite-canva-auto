@@ -142,7 +142,7 @@ def check(pw, name):
     page = context.new_page()
     try:
         error = open_team_settings(page, name)
-        return {'ok':not bool(error),'team_name':name,'can_invite':not bool(error),'note':error or 'Selected team verified on People settings'}
+        return {'ok':not bool(error),'team_name':name,'can_invite':not bool(error),'note':error or 'Selected team verified on People settings', 'details': page.inner_text('body')[:5000] if error else '', 'links':page.locator('a').evaluate_all("es=>es.filter(e=>e.getBoundingClientRect().width>0).map(e=>({text:(e.innerText||'').trim(),href:e.getAttribute('href')}))") if error else []}
     except Exception as exc:
         return {'ok':False,'team_name':name,'can_invite':False,'note':str(exc)[:180]}
     finally:

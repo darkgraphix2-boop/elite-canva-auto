@@ -122,7 +122,12 @@ def open_team_settings(page, name):
         return error
     error = canva_invite._open_settings(page)
     if error:
-        return error
+        notice = page.inner_text('body')[:1200].lower()
+        if 'education plan has ended' in notice:
+            return 'Canva says this team Education plan has ended, and no Invite button is available. Choose another team or check its admin permissions.'
+        if 'downgraded to canva free' in notice:
+            return 'Canva has downgraded this team to Free, and no Invite button is available. Choose another team or check its admin permissions.'
+        return 'Canva did not show an Invite button for this team. Check that this account has permission to invite members.'
     button = page.get_by_role('button', name=re.compile(r'More account and team options$'))
     if button.count() and button.first.is_visible():
         actual = open_account(page)
@@ -142,7 +147,7 @@ def check(pw, name):
     page = context.new_page()
     try:
         error = open_team_settings(page, name)
-        return {'ok':not bool(error),'team_name':name,'can_invite':not bool(error),'note':error or 'Selected team verified on People settings', 'details': page.inner_text('body')[:5000] if error else '', 'links':page.locator('a').evaluate_all("es=>es.filter(e=>e.getBoundingClientRect().width>0).map(e=>({text:(e.innerText||'').trim(),href:e.getAttribute('href')}))") if error else []}
+        return {'ok':not bool(error),'team_name':name,'can_invite':not bool(error),'note':error or 'Selected team verified on People settings'}
     except Exception as exc:
         return {'ok':False,'team_name':name,'can_invite':False,'note':str(exc)[:180]}
     finally:

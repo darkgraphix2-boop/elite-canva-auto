@@ -147,7 +147,28 @@ def check(pw, name):
     page = context.new_page()
     try:
         error = open_team_settings(page, name)
-        return {'ok':not bool(error),'team_name':name,'can_invite':not bool(error),'note':error or 'Selected team verified on People settings'}
+        controls = page.get_by_role('button').evaluate_all("""es => es
+          .filter(e=>e.getBoundingClientRect().width>0)
+          .map(e=>(e.getAttribute('aria-label')||e.innerText||'').trim())
+          .filter(s=>/invite|add (people|members|students|teachers)/i.test(s))
+          .map(s=>s.slice(0,160))""")
+        role = ''
+        email_file = canva_invite.DATA_DIR / 'canva_email.txt'
+        if email_file.exists():
+            own_email = email_file.read_text(encoding='utf-8').strip()
+            own_row = page.get_by_text(re.compile(r'^' + re.escape(own_email) + r'$', re.I))
+            if own_row.count() == 1:
+                role = own_row.evaluate("""e => {
+                  for(let p=e.parentElement,depth=0;p&&depth<7;p=p.parentElement,depth++){
+                    const text=p.innerText||'';
+                    if(text.length>1500) break;
+                    const role=text.match(/(?:^|\\n)(Owner|Administrator|Admin|Teacher|Student|Team member)(?:\\n|$)/i);
+                    if(role) return role[1];
+                  } return '';
+                }""")
+        return {'ok':not bool(error),'team_name':name,'can_invite':not bool(error),
+                'note':error or 'Selected team verified on People settings',
+                'invite_controls':controls,'team_role':role,'settings_url':page.url}
     except Exception as exc:
         return {'ok':False,'team_name':name,'can_invite':False,'note':str(exc)[:180]}
     finally:

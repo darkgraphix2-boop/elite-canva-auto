@@ -373,7 +373,7 @@ ADMIN_PAGE = """<!doctype html>
 </div>
 <div id="panel">
   <h1>{SHOP} - slot requests <button class="ghost" style="float:right" onclick="logout()">Logout</button></h1>
-  <div id="surfbar" style="margin-bottom:12px; font-size:14px"></div>
+  <nav style="margin-bottom:18px"><a href="/canva/invite" style="color:#8eb6ff">Send Canva invite</a> &nbsp; <a href="/canva" style="color:#8eb6ff">Canva login</a></nav><div id="surfbar" style="margin-bottom:12px; font-size:14px"></div>
   <table><thead><tr>
     <th>Waqt</th><th>Code</th><th>Buyer</th><th>Status</th><th>Code valid</th><th></th>
   </tr></thead><tbody id="rows"></tbody></table>
@@ -563,7 +563,7 @@ CANVA_PAGE = """<!DOCTYPE html>
  #msg{margin-top:12px;font-size:13px;min-height:18px;color:#8b949e;white-space:pre-wrap}
  .hide{display:none}
 </style></head><body><div class='card'>
-<h2>Canva Login</h2>
+<h2>Canva Login</h2><p><a href="/canva/invite" style="color:#8eb6ff">Send Canva invite →</a></p>
 <div class='sub'>Canva session cloud pe save hogi - invites khud-ba-khud jayengi</div>
 <div id='stat'></div>
 <form id='loginForm'>
@@ -910,3 +910,89 @@ async def admin_status(request: Request):
             (status, time.time(), rid),
         )
     return {"ok": True}
+
+
+# Owner-facing Canva invitations use the existing admin session.
+CANVA_INVITE_PAGE = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Canva Invites — Elite Tools Store</title><style>
+*{box-sizing:border-box}body{margin:0;background:#0d1424;color:#edf3ff;font:16px system-ui,sans-serif;padding:40px 16px}
+main{max-width:520px;margin:0 auto;background:#152039;border:1px solid #293955;border-radius:20px;padding:28px}
+.brand{color:#80aaff;font-size:12px;font-weight:700;letter-spacing:2px}h1{font-size:28px;margin:12px 0 8px}p{color:#a8b8d2;line-height:1.6}
+label{display:block;margin:24px 0 8px}input,button{width:100%;font:inherit;border-radius:10px;padding:14px}
+input{background:#0d1424;border:1px solid #354a6b;color:white}input:focus{outline:2px solid #5e95ff}
+button{margin-top:14px;border:0;background:#387afa;color:white;font-weight:700;cursor:pointer}button:disabled{opacity:.5;cursor:wait}
+a{color:#8eb6ff}nav{display:flex;gap:20px;margin-top:22px;font-size:14px}#status,#result{padding:14px;border-radius:10px;background:#0d1424;margin-top:18px;white-space:pre-wrap;overflow-wrap:anywhere}
+.good{color:#80e2b1}.bad{color:#ffb0b0}.muted{color:#a8b8d2;font-size:14px}
+</style></head><body><main><div class="brand">ELITE TOOLS STORE</div><h1>Send Canva invite</h1>
+<p>Enter the recipient's email to invite them to your Canva team.</p><div id="status" role="status">Checking Canva login…</div>
+<form id="form"><label for="email">Recipient email</label><input id="email" name="email" type="email" autocomplete="email" placeholder="client@example.com" maxlength="254" required>
+<button id="send" type="submit" disabled>Send invite</button></form><div id="result" role="status" hidden></div>
+<nav><a href="/canva">Canva login</a><a href="/admin">Admin panel</a></nav></main>
+<script>
+const el=id=>document.getElementById(id);let loggedIn=false;
+function show(text,bad=false){el('result').hidden=false;el('result').textContent=text;el('result').className=bad?'bad':'';}
+async function read(response){if(response.status===401){location.href='/admin';throw Error('Admin login required');}const data=await response.json();if(!response.ok||data.ok===false)throw Error(data.error||'Request failed');return data;}
+async function health(){try{const data=await read(await fetch('/api/canva/status'));loggedIn=data.logged_in;el('status').textContent=loggedIn?'Canva session saved — ready to invite.':'Canva login required. Open Canva login below and complete email + OTP.';el('status').className=loggedIn?'good':'bad';el('send').disabled=!loggedIn;}catch(error){el('status').textContent=error.message;}}
+async function track(id,email){for(let i=0;i<180;i++){await new Promise(r=>setTimeout(r,2000));let job;try{job=await read(await fetch('/api/canva/invite-job?id='+encodeURIComponent(id)));}catch(error){show('Status check interrupted: '+error.message,true);continue;}
+if(job.status==='sent'){show('Invite sent to '+email+' ✅');el('send').disabled=false;return;}
+if(job.status==='failed'){show('Invite failed: '+(job.note||'Please check Canva login and try again.'),true);el('send').disabled=false;return;}}
+show('Still processing. Refresh and submit the same email to check the existing request.');el('send').disabled=false;}
+el('form').onsubmit=async event=>{event.preventDefault();el('send').disabled=true;const email=el('email').value.trim();show('Processing invite for '+email+'…');try{const data=await read(await fetch('/api/canva/send-invite',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})}));await track(data.id,email);}catch(error){show(error.message,true);el('send').disabled=!loggedIn;}};
+health();
+</script></body></html>"""
+
+
+@app.get("/canva/invite", response_class=HTMLResponse)
+def canva_invite_page(request: Request):
+    if not admin_ok(request):
+        return HTMLResponse("<meta http-equiv='refresh' content='0;url=/admin'>", status_code=401)
+    return HTMLResponse(CANVA_INVITE_PAGE)
+
+
+@app.post("/api/canva/send-invite")
+async def canva_send_invite(request: Request):
+    if not admin_ok(request):
+        return JSONResponse({"ok": False, "error": "Admin login required"}, status_code=401)
+    try:
+        data = await request.json()
+        email = str(data.get("email", "")).strip().lower()
+    except (ValueError, AttributeError):
+        return JSONResponse({"ok": False, "error": "Valid JSON required"}, status_code=400)
+    if len(email) > 254 or not EMAIL_RE.fullmatch(email):
+        return JSONResponse({"ok": False, "error": "Enter a valid email"}, status_code=400)
+    if not _canva_session_ready():
+        return JSONResponse({"ok": False, "error": "Complete Canva login first using the Canva login link."}, status_code=409)
+    import canva_worker
+    jid = uuid.uuid4().hex[:10]
+    with db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        existing = conn.execute(
+            "SELECT id FROM canva_jobs WHERE email=? AND status IN ('pending','processing','claimed') ORDER BY created_at DESC LIMIT 1",
+            (email,),
+        ).fetchone()
+        if existing:
+            return {"ok": True, "id": existing["id"], "status": "processing"}
+        conn.execute(
+            "INSERT INTO canva_jobs (id,email,buyer,source,created_at,status) VALUES (?,?,?,?,?,?)",
+            (jid, email, "admin", "admin_page", time.time(), "processing"),
+        )
+    try:
+        canva_worker.process_job(jid, email, "admin", "")
+    except Exception:
+        with db() as conn:
+            conn.execute("UPDATE canva_jobs SET status='failed',note=?,updated_at=? WHERE id=?",
+                         ("Invite worker could not start", time.time(), jid))
+        return JSONResponse({"ok": False, "error": "Invite worker could not start"}, status_code=503)
+    return {"ok": True, "id": jid, "status": "processing"}
+
+
+@app.get("/api/canva/invite-job")
+async def canva_invite_job_admin(request: Request, id: str = ""):
+    if not admin_ok(request):
+        return JSONResponse({"ok": False, "error": "Admin login required"}, status_code=401)
+    with db() as conn:
+        row = conn.execute("SELECT id,email,status,note FROM canva_jobs WHERE id=?", (id,)).fetchone()
+    if not row:
+        return JSONResponse({"ok": False, "error": "Invite request not found"}, status_code=404)
+    return {"ok": True, **dict(row)}

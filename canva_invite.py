@@ -45,7 +45,7 @@ SETTINGS_URLS = [
     "https://www.canva.com/settings/people",
 ]
 
-INVITE_BTN_TEXTS = re.compile(r"^(invite people|invite members|add people|invite)$", re.I)
+INVITE_BTN_TEXTS = re.compile(r"^(invite people|invite members|invite for free|invite via email|add people|invite)$", re.I)
 SEND_BTN_TEXTS = re.compile(r"^(send|send invitation|send invite|add|invite)$", re.I)
 SUCCESS_TEXT = re.compile(r"(invitation sent|invite sent|has been sent|invited)", re.I)
 

@@ -605,7 +605,8 @@ $('otpForm').onsubmit=async e=>{e.preventDefault();
  try{const r=await fetch('/api/canva/otp',{method:'POST',
    headers:{'Content-Type':'application/json'},body:JSON.stringify({otp:$('otp').value})});
   const j=await r.json();$('msg').textContent=j.message||j.status;
-  if(j.status==='ok'){$('otpForm').classList.add('hide');$('loginForm').reset();status();}
+  if(j.status==='ok'){$('otpForm').classList.add('hide');$('otpForm').reset();$('loginForm').reset();await status();}
+  else if(j.status==='fail'){$('otpForm').classList.add('hide');$('otpForm').reset();$('loginForm').classList.remove('hide');}
   else{$('otpForm').classList.remove('hide');}
  }catch(err){$('msg').textContent='Error: '+err;}
  $('obtn').disabled=false;};

@@ -1,0 +1,9 @@
+{
+  "shop_name": "ELITE TOOLS STORE",
+  "bot_token": "",
+  "owner_chat_id": "",
+  "admin_pass": "",
+  "auto_approve": true,
+  "approve_mode": "api",
+  "api_keys": []
+}

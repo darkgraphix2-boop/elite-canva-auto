@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+httpx
+telethon
+playwright==1.62.0
+patchright==1.63.0

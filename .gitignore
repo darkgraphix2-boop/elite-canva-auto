@@ -1,0 +1,7 @@
+config.json
+*.session*
+*.db
+*session.json
+*.log
+shots/
+__pycache__/

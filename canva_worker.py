@@ -336,7 +336,12 @@ def _team_inspect(pw):
                 button.click(timeout=5000)
                 page.wait_for_timeout(1200)
                 break
-        return {"ok": True, "url":page.url, "controls":controls, "body":(page.text_content("body") or "")[:18000], "menu":page.locator("[role=menuitem], [role=option], [role=menuitemradio], [role=menuitemcheckbox], button").evaluate_all("(els)=>els.filter(e=>e.getBoundingClientRect().width>0).map(e=>({text:(e.innerText||'').trim(),label:e.getAttribute('aria-label'),role:e.getAttribute('role'),checked:e.getAttribute('aria-checked'),selected:e.getAttribute('aria-selected')}))")}
+        personal = canva_invite._find_visible(page, page.get_by_text("Personal", exact=True))
+        before = personal.evaluate("(e)=>e.parentElement.parentElement.parentElement.outerHTML") if personal else ""
+        if personal:
+            personal.click(timeout=5000)
+            page.wait_for_timeout(1500)
+        return {"ok": True, "team_html":before, "after_html":page.locator("[role=dialog],[role=menu],[role=listbox]").evaluate_all("(es)=>es.filter(e=>e.getBoundingClientRect().width>0).map(e=>e.outerHTML)"), "url":page.url, "controls":controls, "body":(page.inner_text("body") or "")[:12000], "menu":page.locator("[role=menuitem], [role=option], [role=menuitemradio], [role=menuitemcheckbox], button").evaluate_all("(els)=>els.filter(e=>e.getBoundingClientRect().width>0).map(e=>({text:(e.innerText||'').trim(),label:e.getAttribute('aria-label'),role:e.getAttribute('role'),checked:e.getAttribute('aria-checked'),selected:e.getAttribute('aria-selected')}))")}
     finally:
         context.close()
         browser.close()

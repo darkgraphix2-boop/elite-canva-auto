@@ -46,7 +46,7 @@ SETTINGS_URLS = [
 ]
 
 INVITE_BTN_TEXTS = re.compile(r"^(invite people|invite members|invite for free|invite via email|add people|invite)$", re.I)
-SEND_BTN_TEXTS = re.compile(r"^(send|send invitation|send invite|add|invite)$", re.I)
+SEND_BTN_TEXTS = re.compile(r"^(send|send invitations?|send invites?|invite for free|add|invite)$", re.I)
 SUCCESS_TEXT = re.compile(r"(invitation sent|invite sent|has been sent|invited)", re.I)
 
 
@@ -100,6 +100,18 @@ def _dismiss_cookies(page):
     except Exception:
         pass
     return False
+
+
+
+def _find_send_button(page, inbox):
+    """Find the final submit control near the recipient field."""
+    scope = inbox
+    for _ in range(10):
+        scope = scope.locator("xpath=..")
+        button = _find_visible(page, scope.get_by_role("button", name=SEND_BTN_TEXTS))
+        if button:
+            return button
+    return None
 
 
 def _open_settings(page) -> str:
@@ -160,9 +172,9 @@ def _invite_impl(pw, email: str, debug: bool = False, headless: bool = True, tea
         page.wait_for_timeout(1200)
 
         # email input dhoondo (dialog ke andar)
-        inbox = (_find_visible(page, page.get_by_placeholder(re.compile(r"email", re.I)))
-                 or _find_visible(page, page.locator("input[type=email]"))
-                 or _find_visible(page, page.locator("input")))
+        inbox = (_find_visible(page, page.get_by_placeholder(re.compile(r"^(?!.*search).*email", re.I)))
+                 or _find_visible(page, page.get_by_role("textbox", name=re.compile(r"enter email", re.I)))
+                 or _find_visible(page, page.locator("input[type=email]")))
         if not inbox:
             return {"ok": False, "note": "email input nahi mila",
                     "shot": _shot(page, "no_input")}
@@ -172,8 +184,7 @@ def _invite_impl(pw, email: str, debug: bool = False, headless: bool = True, tea
         # role dropdown (agar aaye) - MEMBER default rehta hai, kuch mat karo
 
         # send dabao
-        send = (_find_visible(page, page.get_by_role("button", name=SEND_BTN_TEXTS))
-                or _find_visible(page, page.locator("button[type=submit]")))
+        send = _find_send_button(page, inbox)
         if not send:
             return {"ok": False, "note": "send button nahi mila",
                     "shot": _shot(page, "no_send")}

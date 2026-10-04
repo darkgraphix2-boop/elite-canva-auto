@@ -103,6 +103,21 @@ def _dismiss_cookies(page):
 
 
 
+
+def _invite_security_error(page):
+    """Surface Canva's explicit rejection instead of calling it a timeout."""
+    try:
+        body = page.inner_text("body")
+    except Exception:
+        return ""
+    if not re.search(r"we can.t send your invitations for security reasons", body, re.I):
+        return ""
+    match = re.search(r"RRS-[A-Za-z0-9-]+", body)
+    code = match.group(0) if match else "no code shown"
+    return ("Canva security block (" + code + "). Invite send nahi hui. "
+            "Normal browser mein Canva se try karo; block rahe to Canva Support ko yeh code do.")
+
+
 def _find_send_button(page, inbox):
     """Find the final submit control near the recipient field."""
     scope = inbox
@@ -194,6 +209,12 @@ def _invite_impl(pw, email: str, debug: bool = False, headless: bool = True, tea
             return {"ok": False, "note": "send button nahi mila",
                     "shot": _shot(page, "no_send")}
         send.click()
+        # Canva may render the rejection after the submit request completes.
+        page.wait_for_timeout(1200)
+        security_error = _invite_security_error(page)
+        if security_error:
+            return {"ok": False, "note": security_error, "reason": "security_block",
+                    "shot": _shot(page, "result")}
 
         # success: toast ya pending list mein email nazar aana
         try:
@@ -201,6 +222,10 @@ def _invite_impl(pw, email: str, debug: bool = False, headless: bool = True, tea
             ok = True
             note = "invite chali gayi"
         except PWTimeout:
+            security_error = _invite_security_error(page)
+            if security_error:
+                return {"ok": False, "note": security_error, "reason": "security_block",
+                        "shot": _shot(page, "result")}
             # fallback: email page pe kahin nazar aa raha (pending list)
             try:
                 if page.get_by_text(email, exact=True).first.is_visible(timeout=2500):

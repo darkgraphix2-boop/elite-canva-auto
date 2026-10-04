@@ -1041,3 +1041,17 @@ async def canva_selected_team_check(request: Request, team_id: str = ""):
     if not team:
         return JSONResponse({"ok":False,"error":"Refresh and select a team"},status_code=400)
     return await asyncio.to_thread(canva_worker.submit,"team_check",{"team_name":team["name"]},150)
+
+
+@app.get("/api/canva/latest-invite-shot")
+def canva_latest_invite_shot(request: Request):
+    """Owner-only screenshot of the most recent completed browser invite."""
+    if not admin_ok(request):
+        return JSONResponse({"ok": False}, status_code=401)
+    from fastapi.responses import FileResponse
+    shots = sorted((DATA_DIR / "shots").glob("canva_result_*.png"),
+                   key=lambda path: path.stat().st_mtime, reverse=True)
+    if not shots:
+        return JSONResponse({"ok": False, "error": "No invite result screenshot exists"}, status_code=404)
+    return FileResponse(str(shots[0]), media_type="image/png",
+                        headers={"Cache-Control": "no-store"})

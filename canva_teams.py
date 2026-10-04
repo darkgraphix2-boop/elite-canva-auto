@@ -9,16 +9,21 @@ import canva_invite
 CATALOG = canva_invite.DATA_DIR / 'canva_teams.json'
 
 
-def _current_name(page):
+def _current_info(page):
     member = page.locator('[aria-label="Number of team members"]').first
     member.wait_for(state='visible', timeout=10000)
-    return member.evaluate("""e => {
+    return member.evaluate(r"""e => {
       for(let p=e.parentElement;p;p=p.parentElement){
-        const lines=(p.innerText||'').split('\\n').map(s=>s.trim()).filter(Boolean);
-        if(lines.length>=3 && !/^(Free|Pro|Education|Business|Teams|Enterprise|•|[0-9,]+)$/i.test(lines[0])
-           && lines.some(s=>/^(Free|Pro|Education|Business|Teams|Enterprise)$/i.test(s))) return lines[0];
-      } return '';
+        const lines=(p.innerText||'').split('\n').map(s=>s.trim()).filter(Boolean);
+        const plan=lines.find(s=>/^(Free|Pro|Education|Business|Teams|Enterprise)$/i.test(s));
+        if(lines.length>=3 && !/^(Free|Pro|Education|Business|Teams|Enterprise|•|[0-9,]+)$/i.test(lines[0]) && plan)
+          return {name:lines[0],plan,members:(e.innerText||'').trim()};
+      } return {name:'',plan:'',members:''};
     }""")
+
+
+def _current_name(page):
+    return _current_info(page)['name']
 
 
 def open_account(page):
@@ -34,7 +39,15 @@ def open_picker(page):
         raise RuntimeError('Current Canva team could not be identified')
     page.get_by_text(current, exact=True).first.click()
     picker = page.get_by_role('listbox', name='Change team', exact=True)
-    picker.wait_for(state='visible', timeout=10000)
+    try:
+        picker.wait_for(state='visible', timeout=3500)
+    except canva_invite.PWTimeout:
+        # A single-team account opens an Invite people submenu, not Change team.
+        invite_action = canva_invite._find_visible(
+            page, page.get_by_text('Invite people', exact=True))
+        if invite_action:
+            return None, current
+        picker.wait_for(state='visible', timeout=10000)
     return picker, current
 
 
@@ -56,8 +69,14 @@ def discover(pw):
           label:e.getAttribute('aria-label')||'',
           text:(e.innerText||'').trim(),
           members:(e.querySelector('[aria-label="Number of team members"]')?.innerText||'').trim()
-        }))""")
+        }))""") if picker is not None else []
         teams = []
+        if picker is None:
+            info = _current_info(page)
+            if info['name'] != current:
+                raise RuntimeError('Current team changed while reading its menu')
+            teams.append({'id':team_id(current),'name':current,'plan':info['plan'],
+                          'members':info['members'],'current':True})
         for row in raw:
             if not row['label'].startswith('Switch to '):
                 continue
@@ -77,7 +96,8 @@ def discover(pw):
         return result
     except Exception as exc:
         canva_invite._shot(page, 'teams_fetch_failed')
-        return {'ok':False,'error':'Teams could not be fetched: '+str(exc)[:180]}
+        print('[canva teams] fetch failed:', type(exc).__name__, str(exc)[:180], flush=True)
+        return {'ok':False,'error':'Canva team menu nahi khul saka. Refresh teams karo; issue rahe to Canva login check karo.'}
     finally:
         context.close()
         browser.close()
@@ -97,6 +117,10 @@ def select(page, name):
     page.goto(canva_invite.CANVA_HOME,wait_until='domcontentloaded',timeout=45000)
     canva_invite._dismiss_cookies(page)
     picker, current = open_picker(page)
+    if picker is None:
+        page.keyboard.press('Escape')
+        page.keyboard.press('Escape')
+        return '' if current == name else 'Selected team is not available in this Canva account. Refresh teams.'
     option = picker.get_by_role('option',name='Switch to '+name,exact=True)
     if option.count()!=1:
         return 'Selected team is missing or ambiguous. Refresh teams.'

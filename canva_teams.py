@@ -166,9 +166,28 @@ def check(pw, name):
                     if(role) return role[1];
                   } return '';
                 }""")
+        form_controls = []
+        form_fields = []
+        if not error:
+            invite_button = canva_invite._find_visible(
+                page, page.get_by_role('button', name=canva_invite.INVITE_BTN_TEXTS))
+            if invite_button:
+                invite_button.click(timeout=8000)
+                page.wait_for_timeout(1200)
+                form_controls = page.get_by_role('button').evaluate_all(r"""es=>es
+                  .filter(e=>e.getBoundingClientRect().width>0)
+                  .map(e=>({label:(e.getAttribute('aria-label')||e.innerText||'').trim(),
+                            disabled:!!e.disabled||e.getAttribute('aria-disabled')==='true'}))
+                  .filter(e=>/send|invite|add|continue|next|cancel/i.test(e.label))
+                  .map(e=>({label:e.label.slice(0,160),disabled:e.disabled}))""")
+                form_fields = page.locator('input,textarea,[contenteditable=true]').evaluate_all(r"""es=>es
+                  .filter(e=>e.getBoundingClientRect().width>0)
+                  .map(e=>({type:e.getAttribute('type')||'',placeholder:e.getAttribute('placeholder')||'',
+                            label:e.getAttribute('aria-label')||'',tag:e.tagName}))""")
         return {'ok':not bool(error),'team_name':name,'can_invite':not bool(error),
                 'note':error or 'Selected team verified on People settings',
-                'invite_controls':controls,'team_role':role,'settings_url':page.url}
+                'invite_controls':controls,'team_role':role,'settings_url':page.url,
+                'form_controls':form_controls,'form_fields':form_fields}
     except Exception as exc:
         return {'ok':False,'team_name':name,'can_invite':False,'note':str(exc)[:180]}
     finally:

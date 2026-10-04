@@ -106,12 +106,17 @@ def _dismiss_cookies(page):
 def _find_send_button(page, inbox):
     """Find the final submit control near the recipient field."""
     scope = inbox
-    for _ in range(10):
+    for _ in range(24):
         scope = scope.locator("xpath=..")
         button = _find_visible(page, scope.get_by_role("button", name=SEND_BTN_TEXTS))
         if button:
             return button
-    return None
+    # Canva can render the submit control in a separate portal. Only accept
+    # a single visible matching control; ambiguous candidates stop the invite.
+    candidates = page.get_by_role("button", name=SEND_BTN_TEXTS)
+    visible = [candidates.nth(i) for i in range(candidates.count())
+               if candidates.nth(i).is_visible()]
+    return visible[0] if len(visible) == 1 else None
 
 
 def _open_settings(page) -> str:

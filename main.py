@@ -1044,12 +1044,15 @@ async def canva_selected_team_check(request: Request, team_id: str = ""):
 
 
 @app.get("/api/canva/latest-invite-shot")
-def canva_latest_invite_shot(request: Request):
+def canva_latest_invite_shot(request: Request, kind: str = "invite"):
     """Owner-only screenshot of the most recent completed browser invite."""
     if not admin_ok(request):
         return JSONResponse({"ok": False}, status_code=401)
     from fastapi.responses import FileResponse
-    shots = sorted((DATA_DIR / "shots").glob("canva_result_*.png"),
+    patterns = {"invite": "canva_result_*.png", "teams": "canva_teams_fetch_failed_*.png"}
+    if kind not in patterns:
+        return JSONResponse({"ok": False, "error": "Unknown screenshot kind"}, status_code=400)
+    shots = sorted((DATA_DIR / "shots").glob(patterns[kind]),
                    key=lambda path: path.stat().st_mtime, reverse=True)
     if not shots:
         return JSONResponse({"ok": False, "error": "No invite result screenshot exists"}, status_code=404)

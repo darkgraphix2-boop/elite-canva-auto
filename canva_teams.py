@@ -168,6 +168,7 @@ def check(pw, name):
                 }""")
         form_controls = []
         form_fields = []
+        send_ready = False
         if not error:
             invite_button = canva_invite._find_visible(
                 page, page.get_by_role('button', name=canva_invite.INVITE_BTN_TEXTS))
@@ -180,6 +181,10 @@ def check(pw, name):
                             disabled:!!e.disabled||e.getAttribute('aria-disabled')==='true'}))
                   .filter(e=>/send|invite|add|continue|next|cancel/i.test(e.label))
                   .map(e=>({label:e.label.slice(0,160),disabled:e.disabled}))""")
+                inbox = (canva_invite._find_visible(page, page.get_by_placeholder(re.compile(r"^(?!.*search).*email", re.I)))
+                         or canva_invite._find_visible(page, page.get_by_role('textbox',name=re.compile(r"enter email",re.I)))
+                         or canva_invite._find_visible(page, page.locator('input[type=email]')))
+                send_ready = bool(inbox and canva_invite._find_send_button(page, inbox))
                 form_fields = page.locator('input,textarea,[contenteditable=true]').evaluate_all(r"""es=>es
                   .filter(e=>e.getBoundingClientRect().width>0)
                   .map(e=>({type:e.getAttribute('type')||'',placeholder:e.getAttribute('placeholder')||'',
@@ -187,7 +192,7 @@ def check(pw, name):
         return {'ok':not bool(error),'team_name':name,'can_invite':not bool(error),
                 'note':error or 'Selected team verified on People settings',
                 'invite_controls':controls,'team_role':role,'settings_url':page.url,
-                'form_controls':form_controls,'form_fields':form_fields}
+                'form_controls':form_controls,'form_fields':form_fields,'send_control_found':send_ready}
     except Exception as exc:
         return {'ok':False,'team_name':name,'can_invite':False,'note':str(exc)[:180]}
     finally:

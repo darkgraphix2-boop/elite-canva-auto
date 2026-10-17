@@ -241,7 +241,7 @@ LOGIN_PAGE = """<!doctype html>
       <label>OTP (2FA code - email/authenticator se)</label>
       <input id="otp" maxlength="8" autocomplete="off" placeholder="123456">
     </div>
-    <button id="btn" type="submit">Login</button>
+    <button id="btn" type="submit">Get Code</button>
     <div id="msg" class="msg"></div>
   </form>
 </div>
@@ -268,9 +268,9 @@ document.getElementById('f').addEventListener('submit', async (e) => {
   try {
     const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
     const j = await r.json();
-    if (j.status === 'ok') { msg.textContent = j.message; msg.className = 'msg ok'; loadSess(); }
+  if (j.status === 'ok') { msg.textContent = 'Login ho gaya!'; msg.className = 'msg ok'; loadSess(); }
     else if (j.status === 'need_otp') { msg.textContent = j.message; msg.className = 'msg warn';
-      document.getElementById('otprow').style.display = 'block'; }
+      document.getElementById('otprow').style.display = 'block'; document.getElementById('btn').textContent = 'Get Code again'; }
     else { msg.textContent = j.message || 'Login fail'; msg.className = 'msg err'; }
   } catch { msg.textContent = 'Server error'; msg.className = 'msg err'; }
   btn.disabled = false;

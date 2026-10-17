@@ -106,6 +106,17 @@ def set_surf_setting(key: str, enabled: bool):
         conn.execute("INSERT OR REPLACE INTO surf_settings(key,value) VALUES(?,?)", (key, "1" if enabled else "0"))
 
 
+def surf_value(key: str, default: str = "") -> str:
+    with db() as conn:
+        row = conn.execute("SELECT value FROM surf_settings WHERE key=?", (key,)).fetchone()
+    return str(row["value"]) if row else default
+
+
+def set_surf_value(key: str, value: str):
+    with db() as conn:
+        conn.execute("INSERT OR REPLACE INTO surf_settings(key,value) VALUES(?,?)", (key, str(value)))
+
+
 def reserve_auto_slot() -> float:
     global _next_auto_at
     with _auto_queue_lock:
@@ -413,7 +424,7 @@ ADMIN_PAGE = """<!doctype html>
 <div id="panel">
   <h1>{SHOP} - slot requests <button class="ghost" style="float:right" onclick="logout()">Logout</button></h1>
   <nav style="margin-bottom:18px"><a href="/canva/invite" style="color:#8eb6ff">Send Canva invite</a> &nbsp; <a href="/canva" style="color:#8eb6ff">Canva login</a></nav><div id="surfbar" style="margin-bottom:12px; font-size:14px"></div>
-  <div class="manage"><span>Surfshark auto-approve</span><button id="autoBtn" onclick="toggleSurf('auto_enabled')">Loading</button><button class="ghost" id="waitBtn" onclick="toggleSurf('wait_after_one')">Wait after 1 request</button><button class="ghost" onclick="resumeSurf()">Resume</button></div>
+  <div class="manage"><span>Surfshark auto-approve</span><button id="autoBtn" onclick="toggleSurf('auto_enabled')">Loading</button><button class="ghost" id="waitBtn" onclick="toggleSurf('wait_after_one')">Wait after 1 request</button><button class="ghost" onclick="resumeSurf()">Resume</button></div><div id="extbar" class="hint" style="margin:10px 0"></div>
   <table><thead><tr>
     <th>Waqt</th><th>Code</th><th>Buyer</th><th>Status</th><th>Code valid</th><th></th>
   </tr></thead><tbody id="rows"></tbody></table>
@@ -463,6 +474,7 @@ async function loadSurf() {
     if (j.logged_in) b.innerHTML = '🟢 Surfshark: <b>logged in</b> (' + (j.email||'?') + ') &nbsp; <a href="/login" style="color:#2dd4bf">manage</a>';
     else b.innerHTML = '🔴 Surfshark: <b>login nahi hai</b> - &nbsp;<a href="/login" style="color:#2dd4bf">abhi login karo</a>&nbsp; (warna codes auto approve nahi honge)';
     if (j.settings) renderSurf(j.settings);
+    const e=document.getElementById('extbar'); if(j.extension) e.innerHTML=(j.extension.working?'🟢 Extension: <b>WORKING</b>':'🔴 Extension: <b>OFFLINE</b>')+' &nbsp; '+(j.extension.logged_in?'🟢 Account: <b>LOGGED IN</b>':'🔴 Account: <b>NOT LOGGED IN</b>');
   } catch {}
 }
 function renderSurf(s){document.getElementById('autoBtn').textContent='Auto-approve: '+(s.auto_enabled?'ON':'OFF');document.getElementById('waitBtn').textContent=s.wait_after_one?'Wait after 1: ON':'Wait after 1: OFF';}
@@ -592,6 +604,7 @@ async def session_status(request: Request):
         "email": surfshark_api.SESSION.email or info.get("email"),
         "expires": (info.get("subscription") or {}).get("expiresAt", "") if isinstance(info.get("subscription"), dict) else "",
         "settings": {"auto_enabled": surf_setting("auto_enabled", "1"), "wait_after_one": surf_setting("wait_after_one"), "paused": surf_setting("paused")},
+        "extension": {"working": time.time()-float(surf_value("extension_last_seen", "0") or 0) < 20, "logged_in": surf_value("extension_logged_in", "0") == "1"},
     }
 
 
@@ -603,6 +616,16 @@ async def surf_settings(request: Request):
         return JSONResponse({"ok": False, "error": "Unknown setting"}, status_code=400)
     set_surf_setting(key, bool(data.get("enabled")))
     return {"ok": True, "settings": {"auto_enabled": surf_setting("auto_enabled", "1"), "wait_after_one": surf_setting("wait_after_one"), "paused": surf_setting("paused")}}
+
+
+@app.post("/v1/extension/heartbeat")
+async def extension_heartbeat(request: Request):
+    if request.headers.get("x-extension-password", "") != configured_admin_pass():
+        return JSONResponse({"ok": False}, status_code=401)
+    data = await request.json()
+    set_surf_value("extension_last_seen", str(time.time()))
+    set_surf_value("extension_logged_in", "1" if bool(data.get("logged_in")) else "0")
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------- canva login (Surfshark /login jaisa)

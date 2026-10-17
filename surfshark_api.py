@@ -45,6 +45,7 @@ def _api_base() -> str:
 # RLock zaroori hai: approve() ke andar renew() dobara lock leta hai
 # (plain Lock pe DEADLOCK hota - pehle runtime patch se fix hota tha)
 _lock = threading.RLock()
+_login_blocked_until = 0.0
 
 LAST_APPROVE = {}  # aakhri approve ki raw response (device info waghera ke liye)
 
@@ -102,7 +103,11 @@ def login(email: str, password: str):
     """Returns: (status, message)
     status: 'ok' | 'need_otp' | 'fail'
     """
+    global _login_blocked_until
     with _lock:
+        remaining = int(_login_blocked_until - time.time())
+        if remaining > 0:
+            return "fail", f"Surfshark ne temporary block lagaya hai. {max(1, (remaining + 59)//60)} minute baad sirf ek baar try karein."
         with _client() as c:
             try:
                 r = c.post("/auth/login", json={"username": email, "password": password})
@@ -131,7 +136,13 @@ def login(email: str, password: str):
             if r.status_code == 401:
                 return "fail", "Email ya password ghalat hai"
             if r.status_code == 429:
-                return "fail", "Bahut zyada koshish - 5 minute baad try karo"
+                retry = r.headers.get("Retry-After", "300")
+                try:
+                    retry_seconds = max(300, int(retry))
+                except ValueError:
+                    retry_seconds = 300
+                _login_blocked_until = time.time() + retry_seconds
+                return "fail", f"Surfshark temporary rate-limit hai. {max(1, (retry_seconds + 59)//60)} minute wait karke sirf ek baar try karein."
             return "fail", f"Surfshark ne jawab diya: {r.status_code} {r.text[:120]}"
 
 

@@ -1000,6 +1000,21 @@ async def extension_requests(request: Request):
     return {"ok": True, "requests": [dict(r) for r in rows]}
 
 
+@app.post("/v1/extension/submit")
+async def extension_submit(request: Request):
+    """Queue a Telegram code for the private browser extension."""
+    if request.headers.get("x-api-key", "") not in list(CONFIG.get("api_keys", [])) + [str(os.environ.get("SURFSHARK_SLOTS_API_KEY", ""))]:
+        return JSONResponse({"ok": False, "error": "Invalid API key"}, status_code=401)
+    data = await request.json(); code = str(data.get("code", "")).strip().upper().replace(" ", "")
+    if not CODE_RE.match(code): return JSONResponse({"ok": False, "error": "Invalid code"}, status_code=400)
+    with db() as conn:
+        row = conn.execute("SELECT id,status FROM requests WHERE code=? AND status IN ('pending','approved') ORDER BY created_at DESC LIMIT 1", (code,)).fetchone()
+        if row: return {"ok": True, "id": row["id"], "status": row["status"]}
+        rid = uuid.uuid4().hex[:10]
+        conn.execute("INSERT INTO requests(id,code,buyer,ip,created_at,status) VALUES(?,?,?,?,?,?)", (rid, code, str(data.get("buyer", ""))[:60], "telegram-extension", time.time(), "pending"))
+    return {"ok": True, "id": rid, "status": "queued"}
+
+
 @app.post("/admin/status")
 async def admin_status(request: Request):
     if not admin_ok(request):

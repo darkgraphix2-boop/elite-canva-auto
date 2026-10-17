@@ -743,7 +743,10 @@ async def canva_otp(request: Request):
 
 def api_key_ok(request: Request) -> bool:
     key = request.headers.get("x-api-key") or request.query_params.get("key") or ""
-    keys = CONFIG.get("api_keys", [])
+    keys = list(CONFIG.get("api_keys", []))
+    env_key = str(os.environ.get("SURFSHARK_SLOTS_API_KEY", "")).strip()
+    if env_key:
+        keys.append(env_key)
     return bool(keys) and key in keys
 
 

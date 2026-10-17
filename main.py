@@ -80,8 +80,6 @@ def init_db():
                    updated_at REAL DEFAULT 0
                )"""
         )
-        conn.execute("CREATE TABLE IF NOT EXISTS canva_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
-        conn.execute("INSERT OR IGNORE INTO canva_settings(key,value) VALUES ('auto_enabled','1'),('wait_after_one','0'),('paused','0')")
 
 
 init_db()
@@ -90,17 +88,6 @@ with db() as conn:
     for column in ("team_id", "team_name"):
         if column not in columns:
             conn.execute(f"ALTER TABLE canva_jobs ADD COLUMN {column} TEXT DEFAULT ''")
-
-
-def canva_setting(key: str, default: str = "0") -> bool:
-    with db() as conn:
-        row = conn.execute("SELECT value FROM canva_settings WHERE key=?", (key,)).fetchone()
-    return bool(row and row["value"] == "1") if row else default == "1"
-
-
-def set_canva_setting(key: str, enabled: bool):
-    with db() as conn:
-        conn.execute("INSERT OR REPLACE INTO canva_settings(key,value) VALUES(?,?)", (key, "1" if enabled else "0"))
 
 
 async def notify_owner(text: str):
@@ -583,7 +570,6 @@ CANVA_PAGE = """<!DOCTYPE html>
  button:disabled{opacity:.6}
  .badge{padding:5px 12px;border-radius:999px;font-size:13px;display:inline-block;margin-bottom:14px}
  .on{background:#12331f;color:#3fb950} .off{background:#3d1d1d;color:#f85149}
- .manage{margin-top:22px;padding-top:18px;border-top:1px solid #30363d}.manage h3{font-size:15px;margin:0 0 10px}.toggle{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:10px 0;color:#c9d1d9;font-size:14px}.toggle button{width:auto;min-width:92px;margin:0;background:#238636}.toggle button.offbtn{background:#3d1d1d;color:#f85149}
  #msg{margin-top:12px;font-size:13px;min-height:18px;color:#8b949e;white-space:pre-wrap}
  .hide{display:none}
 </style></head><body><div class='card'>
@@ -599,11 +585,6 @@ CANVA_PAGE = """<!DOCTYPE html>
  <button id='obtn' type='submit'>Verify code</button>
 </form>
 <div id='msg'></div>
-<section class='manage'><h3>Invite management</h3>
- <div class='toggle'><span>Canva auto invite</span><button id='autoBtn' type='button' onclick='toggleSetting("auto_enabled")'>Loading…</button></div>
- <div class='toggle'><span>Wait after 1 request</span><button id='waitBtn' type='button' onclick='toggleSetting("wait_after_one")'>Loading…</button></div>
- <div class='toggle'><span>Queue status</span><button id='resumeBtn' type='button' onclick='resumeQueue()'>Resume</button></div>
-</section>
 </div>
 <script>
 const $=id=>document.getElementById(id);
@@ -612,12 +593,8 @@ async function status(){
   $('stat').innerHTML=j.logged_in
     ? `<span class='badge on'>🟢 Canva login: ${j.email||'?'}</span>`
     : `<span class='badge off'>🔴 Canva login nahi hai</span>`;
-  if(j.settings)renderSettings(j.settings);
  }catch(e){$('stat').innerHTML=`<span class='badge off'>🔴 status nahi mila</span>`;}
 }
-function renderSettings(s){for(const [id,key] of [['autoBtn','auto_enabled'],['waitBtn','wait_after_one']]){const b=$(id),on=!!s[key];b.textContent=on?'ON':'OFF';b.className=on?'':'offbtn';} $('resumeBtn').textContent=s.paused?'Resume queue':'Queue running';}
-async function toggleSetting(key){const id=key==='auto_enabled'?'autoBtn':'waitBtn';const r=await fetch('/api/canva/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key,enabled:!$(id).textContent.includes('ON')})});const j=await r.json();if(j.ok)renderSettings(j.settings);}
-async function resumeQueue(){const r=await fetch('/api/canva/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:'paused',enabled:false})});const j=await r.json();if(j.ok)renderSettings(j.settings);}
 $('loginForm').onsubmit=async e=>{e.preventDefault();
  $('lbtn').disabled=true;$('msg').textContent='Canva khol raha hoon... (30-60s)';
  try{const r=await fetch('/api/canva/login',{method:'POST',
@@ -659,17 +636,7 @@ async def canva_status(request: Request):
         email = (DATA_DIR / "canva_email.txt").read_text(encoding="utf-8").strip()
     except Exception:
         pass
-    return {"logged_in": sess.exists(), "email": email, "settings": {"auto_enabled": canva_setting("auto_enabled", "1"), "wait_after_one": canva_setting("wait_after_one"), "paused": canva_setting("paused")}}
-
-
-@app.post("/api/canva/settings")
-async def canva_settings(request: Request):
-    if not admin_ok(request): return JSONResponse({"ok": False, "error": "Admin login karo"}, status_code=401)
-    data = await request.json(); key = str(data.get("key", ""))
-    if key not in ("auto_enabled", "wait_after_one", "paused"):
-        return JSONResponse({"ok": False, "error": "Unknown setting"}, status_code=400)
-    set_canva_setting(key, bool(data.get("enabled")))
-    return {"ok": True, "settings": {"auto_enabled": canva_setting("auto_enabled", "1"), "wait_after_one": canva_setting("wait_after_one"), "paused": canva_setting("paused")}}
+    return {"logged_in": sess.exists(), "email": email}
 
 
 @app.post("/api/canva/login")
@@ -867,8 +834,6 @@ async def canva_next(request: Request):
     """PC agent: oldest pending job claim karo."""
     if not canva_agent_ok(request):
         return JSONResponse({"ok": False, "error": "Invalid agent key"}, status_code=401)
-    if not canva_setting("auto_enabled", "1") or canva_setting("paused"):
-        return {"ok": True, "job": None, "paused": True}
     with db() as conn:
         row = conn.execute(
             "SELECT * FROM canva_jobs WHERE status='pending' "
@@ -877,8 +842,6 @@ async def canva_next(request: Request):
             return {"ok": True, "job": None}
         conn.execute("UPDATE canva_jobs SET status='claimed', updated_at=? WHERE id=?",
                      (time.time(), row["id"]))
-    if canva_setting("wait_after_one"):
-        set_canva_setting("paused", True)
     return {"ok": True, "job": {"id": row["id"], "email": row["email"], "buyer": row["buyer"]}}
 
 

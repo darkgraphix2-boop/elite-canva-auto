@@ -493,8 +493,13 @@ async def claim(request: Request):
     return {"ok": True, "id": rid}
 
 
+def configured_admin_pass() -> str:
+    return str(os.environ.get("ADMIN_PASS") or os.environ.get("admin_pass") or CONFIG.get("admin_pass", ""))
+
+
 def admin_ok(request: Request) -> bool:
-    return bool(CONFIG.get("admin_pass")) and request.cookies.get("admin") == CONFIG["admin_pass"]
+    expected = configured_admin_pass()
+    return bool(expected) and request.cookies.get("admin") == expected
 
 
 @app.get("/admin", response_class=HTMLResponse)
@@ -881,10 +886,10 @@ async def canva_result(request: Request):
 @app.post("/admin/login")
 async def admin_login(request: Request):
     data = await request.json()
-    if str(data.get("pass", "")) != CONFIG.get("admin_pass", ""):
+    if str(data.get("pass", "")) != configured_admin_pass():
         return JSONResponse({"ok": False}, status_code=401)
     resp = JSONResponse({"ok": True})
-    resp.set_cookie("admin", CONFIG.get("admin_pass", ""), httponly=True, samesite="lax")
+    resp.set_cookie("admin", configured_admin_pass(), httponly=True, samesite="lax")
     return resp
 
 

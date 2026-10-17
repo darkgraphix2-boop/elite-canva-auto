@@ -944,6 +944,16 @@ async def requests_list(request: Request):
     return {"ok": True, "requests": [dict(r) for r in rows]}
 
 
+@app.get("/v1/extension/requests")
+async def extension_requests(request: Request):
+    """Read-only queue for the private VPS browser extension."""
+    if request.headers.get("x-extension-password", "") != configured_admin_pass():
+        return JSONResponse({"ok": False}, status_code=401)
+    with db() as conn:
+        rows = conn.execute("SELECT id, code, buyer, created_at, status FROM requests WHERE status='pending' ORDER BY created_at ASC LIMIT 10").fetchall()
+    return {"ok": True, "requests": [dict(r) for r in rows]}
+
+
 @app.post("/admin/status")
 async def admin_status(request: Request):
     if not admin_ok(request):

@@ -32,6 +32,9 @@ NOTIFY_LOG = DATA_DIR / "notify.log"
 
 CODE_RE = re.compile(r"^[A-Z0-9]{6}$")
 CODE_TTL = 5 * 60 + 30  # Surfshark code ~5 min baad refresh hota hai
+AUTO_APPROVE_GAP = 100
+_auto_queue_lock = threading.Lock()
+_next_auto_at = 0.0
 
 app = FastAPI(title="Elite Slots")
 
@@ -101,6 +104,22 @@ def surf_setting(key: str, default: str = "0") -> bool:
 def set_surf_setting(key: str, enabled: bool):
     with db() as conn:
         conn.execute("INSERT OR REPLACE INTO surf_settings(key,value) VALUES(?,?)", (key, "1" if enabled else "0"))
+
+
+def reserve_auto_slot() -> float:
+    global _next_auto_at
+    with _auto_queue_lock:
+        now = time.time()
+        start_at = max(now, _next_auto_at)
+        _next_auto_at = start_at + AUTO_APPROVE_GAP
+        return start_at
+
+
+def delayed_auto_approve(code: str, rid: str, start_at: float):
+    delay = max(0, start_at - time.time())
+    if delay:
+        time.sleep(delay)
+    _auto_approve_job(code, rid)
 
 
 async def notify_owner(text: str):
@@ -511,7 +530,8 @@ async def claim(request: Request):
     if surf_setting("auto_enabled", "1") and not surf_setting("paused"):
         if surf_setting("wait_after_one"):
             set_surf_setting("paused", True)
-        threading.Thread(target=_auto_approve_job, args=(code, rid), daemon=True).start()
+        start_at = reserve_auto_slot()
+        threading.Thread(target=delayed_auto_approve, args=(code, rid, start_at), daemon=True).start()
     return {"ok": True, "id": rid}
 
 

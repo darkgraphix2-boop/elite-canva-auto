@@ -80,6 +80,8 @@ def init_db():
                    updated_at REAL DEFAULT 0
                )"""
         )
+        conn.execute("CREATE TABLE IF NOT EXISTS surf_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        conn.execute("INSERT OR IGNORE INTO surf_settings(key,value) VALUES ('auto_enabled','1'),('wait_after_one','0'),('paused','0')")
 
 
 init_db()
@@ -88,6 +90,17 @@ with db() as conn:
     for column in ("team_id", "team_name"):
         if column not in columns:
             conn.execute(f"ALTER TABLE canva_jobs ADD COLUMN {column} TEXT DEFAULT ''")
+
+
+def surf_setting(key: str, default: str = "0") -> bool:
+    with db() as conn:
+        row = conn.execute("SELECT value FROM surf_settings WHERE key=?", (key,)).fetchone()
+    return bool(row and row["value"] == "1") if row else default == "1"
+
+
+def set_surf_setting(key: str, enabled: bool):
+    with db() as conn:
+        conn.execute("INSERT OR REPLACE INTO surf_settings(key,value) VALUES(?,?)", (key, "1" if enabled else "0"))
 
 
 async def notify_owner(text: str):
@@ -369,6 +382,8 @@ ADMIN_PAGE = """<!doctype html>
   #login { display: none; max-width: 320px; }
   #panel { display: none; }
   .hint { color: #8b96ad; font-size: 12px; margin-top: 8px; }
+ .manage { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:12px 0; padding:12px; background:#171e2e; border:1px solid #26304a; border-radius:10px; }
+ .manage span { color:#8b96ad; font-size:13px; }
 </style></head><body>
 <div id="login">
   <h1>Admin login</h1>
@@ -379,6 +394,7 @@ ADMIN_PAGE = """<!doctype html>
 <div id="panel">
   <h1>{SHOP} - slot requests <button class="ghost" style="float:right" onclick="logout()">Logout</button></h1>
   <nav style="margin-bottom:18px"><a href="/canva/invite" style="color:#8eb6ff">Send Canva invite</a> &nbsp; <a href="/canva" style="color:#8eb6ff">Canva login</a></nav><div id="surfbar" style="margin-bottom:12px; font-size:14px"></div>
+  <div class="manage"><span>Surfshark auto-approve</span><button id="autoBtn" onclick="toggleSurf('auto_enabled')">Loading</button><button class="ghost" id="waitBtn" onclick="toggleSurf('wait_after_one')">Wait after 1 request</button><button class="ghost" onclick="resumeSurf()">Resume</button></div>
   <table><thead><tr>
     <th>Waqt</th><th>Code</th><th>Buyer</th><th>Status</th><th>Code valid</th><th></th>
   </tr></thead><tbody id="rows"></tbody></table>
@@ -427,8 +443,12 @@ async function loadSurf() {
     const b = document.getElementById('surfbar');
     if (j.logged_in) b.innerHTML = '🟢 Surfshark: <b>logged in</b> (' + (j.email||'?') + ') &nbsp; <a href="/login" style="color:#2dd4bf">manage</a>';
     else b.innerHTML = '🔴 Surfshark: <b>login nahi hai</b> - &nbsp;<a href="/login" style="color:#2dd4bf">abhi login karo</a>&nbsp; (warna codes auto approve nahi honge)';
+    if (j.settings) renderSurf(j.settings);
   } catch {}
 }
+function renderSurf(s){document.getElementById('autoBtn').textContent='Auto-approve: '+(s.auto_enabled?'ON':'OFF');document.getElementById('waitBtn').textContent=s.wait_after_one?'Wait after 1: ON':'Wait after 1: OFF';}
+async function toggleSurf(key){const id=key==='auto_enabled'?'autoBtn':'waitBtn';const on=document.getElementById(id).textContent.includes('ON');const r=await fetch('/api/surf/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key,enabled:!on})});const j=await r.json();if(j.ok)renderSurf(j.settings);}
+async function resumeSurf(){const r=await fetch('/api/surf/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:'paused',enabled:false})});const j=await r.json();if(j.ok)renderSurf(j.settings);}
 function loginBox() { document.getElementById('login').style.display = 'block'; document.getElementById('panel').style.display = 'none'; }
 function panel()    { document.getElementById('login').style.display = 'none'; document.getElementById('panel').style.display = 'block'; }
 document.getElementById('pass').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
@@ -488,7 +508,9 @@ async def claim(request: Request):
            "Ye code ~5 min mein refresh hoga - ABHI Surfshark app mein\n"
            "Settings > My Account > Enter login code mein daal do.")
     )
-    if CONFIG.get("auto_approve", True):
+    if surf_setting("auto_enabled", "1") and not surf_setting("paused"):
+        if surf_setting("wait_after_one"):
+            set_surf_setting("paused", True)
         threading.Thread(target=_auto_approve_job, args=(code, rid), daemon=True).start()
     return {"ok": True, "id": rid}
 
@@ -549,7 +571,18 @@ async def session_status(request: Request):
         "logged_in": True,
         "email": surfshark_api.SESSION.email or info.get("email"),
         "expires": (info.get("subscription") or {}).get("expiresAt", "") if isinstance(info.get("subscription"), dict) else "",
+        "settings": {"auto_enabled": surf_setting("auto_enabled", "1"), "wait_after_one": surf_setting("wait_after_one"), "paused": surf_setting("paused")},
     }
+
+
+@app.post("/api/surf/settings")
+async def surf_settings(request: Request):
+    if not admin_ok(request): return JSONResponse({"ok": False}, status_code=401)
+    data = await request.json(); key = str(data.get("key", ""))
+    if key not in ("auto_enabled", "wait_after_one", "paused"):
+        return JSONResponse({"ok": False, "error": "Unknown setting"}, status_code=400)
+    set_surf_setting(key, bool(data.get("enabled")))
+    return {"ok": True, "settings": {"auto_enabled": surf_setting("auto_enabled", "1"), "wait_after_one": surf_setting("wait_after_one"), "paused": surf_setting("paused")}}
 
 
 # ---------------------------------------------------------------- canva login (Surfshark /login jaisa)
